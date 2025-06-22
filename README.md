@@ -1,13 +1,13 @@
-# Testing Agent Demo
+# Testing Agent Demo - Azure OpenAI Edition
 
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](frontend/LICENSE)
 
-This monorepo demonstrates how you can use OpenAI's CUA model and [computer use tool](https://platform.openai.com/docs/guides/tools-computer-use) to automate frontend testing. It uses [Playwright](https://playwright.dev) to spin up a browser instance and navigate to the web app to be tested. The CUA model then follows the provided test case and executes actions on the interface until the test case is done.  
+This monorepo demonstrates how you can use Azure OpenAI's computer-use-preview model and [computer use tool](https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/computer-use) to automate frontend testing. It uses [Playwright](https://playwright.dev) to spin up a browser instance and navigate to the web app to be tested. The Azure OpenAI computer-use-preview model then follows the provided test case and executes actions on the interface until the test case is done.  
 
 The repo contains three applications that work together:
 
 - **frontend** – Next.js web interface used to configure tests and watch them run.
-- **cua-server** – Node service that communicates with the OpenAI CUA model and drives Playwright to interact in a browser with the sample app.
+- **cua-server** – Node service that communicates with the Azure OpenAI computer-use-preview model and drives Playwright to interact in a browser with the sample app.
 - **sample-test-app** – Example e‑commerce site used as an example app to test by the agent.
 
 ![screenshot](./screenshot.jpg)
@@ -24,9 +24,16 @@ The repo contains three applications that work together:
    cd openai-testing-agent-demo
    ```
 
-2. **Prepare environment files**
+2. **Set up Azure OpenAI**
 
-   If you haven't set your `OPENAI_API_KEY` environment variable on your terminal or globally on your machine (set up instructions [here](https://platform.openai.com/docs/libraries#create-and-export-an-api-key)), edit each `.env.development` file and set `OPENAI_API_KEY`.
+   - Create an Azure OpenAI resource in the Azure portal
+   - Deploy the `computer-use-preview` model for computer use capabilities
+   - Deploy a chat model like `gpt-4o` for test case generation
+   - Get your API key and endpoint from the Azure portal
+
+3. **Prepare environment files**
+
+   Copy the example environment files and configure with your Azure OpenAI settings:
 
    ```bash
    cp frontend/.env.example frontend/.env.development
@@ -43,14 +50,14 @@ The repo contains three applications that work together:
 
    Make sure you add a `sample-test-app/.env.development` file with the example credentials to run the demo.
 
-3. **Install dependencies**
+4. **Install dependencies**
 
    ```bash
    npm install
    npx playwright install
    ```
 
-4. **Run all apps**
+5. **Run all apps**
 
    ```bash
    npm run dev
@@ -84,6 +91,7 @@ You are welcome to open issues or submit PRs to improve this app, however, pleas
 
 - This project is meant to be used on test environments only.
 - Do not use real user data in production.
+- Ensure your Azure OpenAI API keys are kept secure and not committed to version control.
 
 ## License
 
