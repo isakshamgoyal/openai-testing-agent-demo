@@ -1,8 +1,10 @@
-import OpenAI from "openai";
+import { AzureOpenAI } from "openai";
 import logger from "../utils/logger";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const openai = new AzureOpenAI({
+  apiKey: process.env.AZURE_API_KEY,
+  apiVersion: process.env.AZURE_API_VERSION,
+  endpoint: process.env.AZURE_ENDPOINT,
 });
 
 // Environment specific instructions for the CUA model e.g., MacOS specific actions CMD+A vs CTRL+A
@@ -52,7 +54,7 @@ async function callCUAModel(input: any[], previousResponseId?: string) {
   logger.trace("Sending request body to the model...");
 
   const requestBody: any = {
-    model: "computer-use-preview",
+    model: process.env.AZURE_COMPUTER_USE_MODEL_DEPLOYMENT_NAME || 'computer-use-preview',
     tools,
     input,
     reasoning: {

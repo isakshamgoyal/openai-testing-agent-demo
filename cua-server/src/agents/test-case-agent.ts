@@ -1,6 +1,6 @@
 import { PROMPT_WITHOUT_LOGIN, PROMPT_WITH_LOGIN } from "../lib/constants";
 import logger from "../utils/logger";
-import OpenAI from "openai";
+import { AzureOpenAI } from "openai";
 import { z } from "zod";
 import { zodTextFormat } from "openai/helpers/zod";
 
@@ -16,10 +16,14 @@ export const TestCaseSchema = z.object({
 
 export type TestCase = z.infer<typeof TestCaseSchema>;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const client = new AzureOpenAI({
+  apiKey: process.env.AZURE_API_KEY,
+  apiVersion: process.env.AZURE_API_VERSION,
+  endpoint: process.env.AZURE_ENDPOINT,
+});
 
 class TestCaseAgent {
-  private readonly model = "o3-mini";
+  private readonly model = process.env.AZURE_TEST_CASE_AGENT_DEPLOYMENT_NAME_CHAT || "o3-mini";
   private readonly developer_prompt: string;
   private readonly login_required: boolean;
 
@@ -35,8 +39,8 @@ class TestCaseAgent {
    * Generate structured test steps via the Responses API.
    */
   async invokeResponseAPI(userInstruction: string): Promise<TestCase> {
-    logger.debug("Invoking Response API", { userInstruction });
-    const response = await openai.responses.parse({
+    logger.debug("Invoking Response API", { userInstruction });
+    const response = await client.responses.parse({
       model: this.model,
       input: [
         { role: "system", content: this.developer_prompt },
@@ -46,7 +50,7 @@ class TestCaseAgent {
         format: zodTextFormat(TestCaseSchema, "test_case"),
       },
     });
-    logger.debug("Response API output", { output: response.output_parsed });
+    logger.debug("Response API output", { output: response.output_parsed });
     return response.output_parsed!;
   }
 }

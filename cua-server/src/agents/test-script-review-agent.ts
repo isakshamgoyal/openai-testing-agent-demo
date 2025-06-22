@@ -3,13 +3,17 @@
  * Each call to checkTestScriptStatus enqueues a new screenshot processing job.
  */
 import logger from "../utils/logger";
-import OpenAI from "openai";
+import { AzureOpenAI } from "openai";
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { TEST_SCRIPT_REVIEW_PROMPT } from "../lib/constants";
 
-const openai = new OpenAI();
+const client = new AzureOpenAI({
+  apiKey: process.env.AZURE_API_KEY,
+  apiVersion: process.env.AZURE_API_VERSION,
+  endpoint: process.env.AZURE_ENDPOINT,
+});
 
 interface TestScriptState {
   steps: Array<{
@@ -41,8 +45,8 @@ class TestScriptReviewAgent {
   private processingQueue: boolean = false;
 
   constructor() {
-    // Set the default model to "gpt-4o"
-    this.model = "gpt-4o";
+    // Set the default model to use Azure deployment
+    this.model = process.env.AZURE_TEST_SCRIPT_REVIEW_AGENT_DEPLOYMENT_NAME_CHAT || 'gpt-4o';
 
     // Maintain the previous response id.
     this.previous_response_id = null;
@@ -65,7 +69,7 @@ class TestScriptReviewAgent {
       `Instantiation agent - This should only be called once per test script run.`
     );
 
-    const response = await openai.responses.create({
+    const response = await client.responses.create({
       model: this.model,
       input: [
         { role: "system", content: TEST_SCRIPT_REVIEW_PROMPT },
@@ -91,20 +95,20 @@ class TestScriptReviewAgent {
                     step_number: { type: "number" },
                     status: {
                       type: "string",
-                      enum: ["pending", "Pass", "Fail"],
+                      enum: ["pending", "Pass", "Fail"]
                     },
-                    step_reasoning: { type: "string" },
+                    step_reasoning: { type: "string" }
                   },
                   required: ["step_number", "status", "step_reasoning"],
-                  additionalProperties: false,
-                },
-              },
+                  additionalProperties: false
+                }
+              }
             },
             required: ["steps"],
-            additionalProperties: false,
+            additionalProperties: false
           },
-        },
-      },
+        }
+      }
     });
 
     logger.debug(
@@ -219,7 +223,7 @@ class TestScriptReviewAgent {
     });
 
     // Call the OpenAI API with the new payload.
-    const response = await openai.responses.create({
+    const response = await client.responses.create({
       model: this.model,
       input: inputMessages,
       previous_response_id: this.previous_response_id || undefined,
@@ -238,23 +242,26 @@ class TestScriptReviewAgent {
                     step_number: { type: "number" },
                     status: {
                       type: "string",
-                      enum: ["pending", "Pass", "Fail"],
+                      enum: ["pending", "Pass", "Fail"]
                     },
-                    step_reasoning: { type: "string" },
+                    step_reasoning: { type: "string" }
                   },
                   required: ["step_number", "status", "step_reasoning"],
-                  additionalProperties: false,
-                },
-              },
+                  additionalProperties: false
+                }
+              }
             },
             required: ["steps"],
-            additionalProperties: false,
-          },
-        },
-      },
+            additionalProperties: false
+          }
+        }
+      }
     });
 
     logger.debug(`Response output text: ${response.output_text}`);
+
+
+    // logger.debug(`Response output text: ${response.output_text}`);
 
     // Conditionally update the previous response id based on the config setting.
     if (this.includePreviousResponse) {
