@@ -1,5 +1,6 @@
 import { AzureOpenAI } from "openai";
 import logger from "../utils/logger";
+import { CUA_SYSTEM_PROMPT } from "../lib/constants";
 
 // Single OpenAI client instance for CUA
 const cua_client = new AzureOpenAI({
@@ -30,15 +31,6 @@ const CUA_TOOLS = [
     parameters: {},
   },
 ];
-
-// CUA system prompt template
-const CUA_SYSTEM_PROMPT = `You are a testing agent. You will be given a list of instructions with steps to test a web application. 
-You will need to navigate the web application and perform the actions described in the instructions.
-Try to accomplish the provided task in the simplest way possible.
-Once you believe your are done with all the tasks required or you are blocked and cannot progress
-(for example, you have tried multiple times to acommplish a task but keep getting errors or blocked),
-use the mark_done tool to let the user know you have finished the tasks.
-You do not need to authenticate on user's behalf, the user will authenticate and your flow starts after that.`;
 
 // CUA-specific interfaces
 export interface CUAModelInput {
