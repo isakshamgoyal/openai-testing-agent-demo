@@ -1,13 +1,16 @@
-import { ModelInput } from "../services/openai-cua-client";
 import logger from "../utils/logger";
 import { Socket } from "socket.io";
-import { sendInputToModel } from "../services/openai-cua-client";
+import { cua_service, CUAModelInput } from "../services/openai-cua-service";
 import { computerUseLoop } from "../lib/computer-use-loop";
+
 export async function handleSocketMessage(
   socket: Socket,
   msg: string
 ): Promise<void> {
-  logger.debug(`Server received message: ${msg}`);
+  logger.debug("Handling socket message", { 
+    messageLength: msg.length,
+    socketId: socket.id 
+  });
 
   // A message from user resumes the test script or instructs model to take an action.
   const page = socket.data.page;
@@ -18,13 +21,15 @@ export async function handleSocketMessage(
   const screenshotBase64 = screenshot.toString("base64");
 
   const lastCallId = socket.data.lastCallId;
-  const modelInput: ModelInput = {
+  const modelInput: CUAModelInput = {
     screenshotBase64: screenshotBase64,
     previousResponseId: previousResponseId,
     lastCallId: lastCallId,
   };
 
-  const resumeResponse = await sendInputToModel(modelInput, msg);
+  logger.debug("Sending input to CUA model");
+
+  const resumeResponse = await cua_service.sendScreenshotToModel(modelInput, msg);
 
   const response = await computerUseLoop(
     page,
@@ -38,6 +43,8 @@ export async function handleSocketMessage(
   );
 
   if (messageResponse.length > 0) {
+    logger.debug("Emitting model messages to socket");
+    
     messageResponse.forEach((message: any) => {
       if (Array.isArray(message.content)) {
         message.content.forEach((contentBlock: any) => {

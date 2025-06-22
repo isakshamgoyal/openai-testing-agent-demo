@@ -1,9 +1,6 @@
 // lib/modules/computer-use-loop.ts
 import { Page } from "playwright";
-import {
-  sendInputToModel,
-  sendFunctionCallOutput,
-} from "../services/openai-cua-client";
+import { cua_service } from "../services/openai-cua-service";
 import { handleModelAction } from "../handlers/action-handler";
 import logger from "../utils/logger";
 import { Socket } from "socket.io";
@@ -21,17 +18,20 @@ export async function computerUseLoop(
   switchedToNewTab: boolean = false // <-- Flag to ensure recursion happens only once for a new tab.
 ) {
   await page.screenshot({ path: "screenshot.png" });
+  logger.debug("Starting computer use loop", {
+    responseId: response.id,
+    socketId: socket.id
+  });
+
   while (true) {
     // Check if the test case status is 'fail'.
     if (socket.data.testCaseStatus === "fail") {
-      logger.debug("Test case failed. Exiting the computer use loop.");
-
+      logger.info("Test case failed - exiting computer use loop");
       return response;
     }
 
     if (socket.data.testCaseStatus === "pass") {
-      logger.debug("Test case passed. Exiting the computer use loop.");
-
+      logger.info("Test case passed - exiting computer use loop");
       return response;
     }
 
@@ -47,7 +47,8 @@ export async function computerUseLoop(
     if (functionCalls.length > 0) {
       for (const funcCall of functionCalls) {
         if (funcCall.name === "mark_done") {
-          response = await sendFunctionCallOutput(
+          logger.info("Processing mark_done function call");
+          response = await cua_service.sendFunctionResult(
             funcCall.call_id,
             response.id,
             {
@@ -66,11 +67,9 @@ export async function computerUseLoop(
     socket.data.previousResponseId = response.id;
 
     if (computerCalls.length === 0) {
-      logger.debug("No computer call found. Final output from model:");
+      logger.debug("No computer call found in model response");
       response.output.forEach((item: any) => {
-        logger.debug(
-          `Output from the model - ${JSON.stringify(item, null, 2)}`
-        );
+        logger.trace("Output from the Model", `${JSON.stringify(item, null, 2)}`);
       });
 
       const messageResponse = response.output.filter(
@@ -81,20 +80,16 @@ export async function computerUseLoop(
         // Check if the response is a message.
         // NOTE: This is unused in this demo as we force the model to call tools with tool_choice = required
         // Update this logic to handle messages from the model if needed for your use case      if (messageResponse.length > 0) {
-        logger.debug(
-          "Response is a message. Trying to get answer from CUA Control Agent."
-        );
+        logger.debug("Processing message response from CUA model");
         const message = messageResponse[0].content[0].text;
 
-        logger.debug(`Message from the CUA model: ${message}`);
+        logger.debug("CUA model message", { message });
 
         if (!message.call_id) {
-          logger.debug(
-            `No call id found in the message. Exiting the computer use loop.`
-          );
+          logger.warn("No call id found in message - exiting computer use loop");
         }
 
-        response = await sendInputToModel(
+        response = await cua_service.sendScreenshotToModel(
           {
             screenshotBase64: "",
             previousResponseId: response.id,
@@ -104,9 +99,7 @@ export async function computerUseLoop(
         );
       } else {
         // If its not a computer_call, we just return the response.
-        logger.debug(
-          `Response for the model is neither a computer_call nor a message. Returning the response.`
-        );
+        logger.debug("Response is neither computer_call nor message - returning response");
         return response;
       }
     } else {
@@ -122,7 +115,7 @@ export async function computerUseLoop(
             : "No reasoning provided";
           socket.emit("message", `${summaryText}`);
 
-          logger.debug(`Model reasoning: ${summaryText}`);
+          logger.debug("Model reasoning", { summary: summaryText });
         });
       }
 
@@ -135,7 +128,7 @@ export async function computerUseLoop(
         computerCall.pending_safety_checks.length > 0
       ) {
         const safetyCheck = computerCall.pending_safety_checks[0];
-        logger.error(`Safety check detected: ${safetyCheck.message}`);
+        logger.error("Safety check detected", { message: safetyCheck.message });
         socket.emit("message", `Safety check detected: ${safetyCheck.message}`);
         socket.emit(
           "message",
@@ -151,11 +144,16 @@ export async function computerUseLoop(
 
       const action = (computerCall as any).action;
 
+      logger.debug("Processing computer action", { 
+        actionType: action?.type,
+      });
+
       // Take a screenshot of the page before the action is executed.
       if (["click"].includes(action?.type)) {
         const screenshotBuffer = await page.screenshot();
         const screenshotBase64 = screenshotBuffer.toString("base64");
 
+        logger.debug("Sending screenshot to test script review agent");
         const testScriptReviewResponsePromise =
           testCaseReviewAgent.checkTestScriptStatus(screenshotBase64);
         // Asynchronously emit the test script review response to the socket.
@@ -164,9 +162,9 @@ export async function computerUseLoop(
             socket.emit("testscriptupdate", testScriptReviewResponse);
           })
           .catch((error) => {
-            logger.error(
-              "Error during test script review: {error: " + error + "}"
-            );
+            logger.error("Test script review failed", { 
+              error: error instanceof Error ? error.message : error 
+            });
             socket.emit("testscriptupdate", {
               error: "Review processing failed.",
             });
@@ -185,26 +183,24 @@ export async function computerUseLoop(
       if (pages.length > 1 && !switchedToNewTab) {
         // Assume the new tab is the last page.
         const newPage = pages[pages.length - 1];
-        logger.debug(
-          "New tab detected. Switching context to the new tab (recursion will happen only once)."
-        );
+        logger.info("New tab detected - switching context");
 
         // Continue with your logic using newPage...
         const viewport = newPage.viewportSize();
-        logger.trace(
-          `Viewport dimensions of new page: ${viewport?.width}, ${viewport?.height}`
-        );
+        logger.debug("New page viewport", { 
+          width: viewport?.width,
+          height: viewport?.height 
+        });
 
         if (
           !viewport ||
           viewport.width !== defaultWidth ||
           viewport.height !== defaultHeight
         ) {
-          logger.debug(
-            `Resetting viewport size from (${viewport?.width || "undefined"}, ${
-              viewport?.height || "undefined"
-            }) to default (${defaultWidth}, ${defaultHeight}).`
-          );
+          logger.debug("Resetting viewport size", {
+            from: `${viewport?.width || "undefined"}x${viewport?.height || "undefined"}`,
+            to: `${defaultWidth}x${defaultHeight}`
+          });
           await newPage.setViewportSize({
             width: defaultWidth,
             height: defaultHeight,
@@ -216,16 +212,15 @@ export async function computerUseLoop(
         const screenshotBase64 = screenshotBuffer.toString("base64");
 
         // Send the screenshot back as a computer_call_output.
-        response = (await sendInputToModel({
+        response = (await cua_service.sendScreenshotToModel({
           screenshotBase64,
           previousResponseId: response.id,
           lastCallId,
         })) as any;
 
-        logger.info(
-          "Recursively calling computerUseLoop with new page context."
-        );
-        logger.trace(`Response: ${JSON.stringify(response, null, 2)}`);
+        logger.info("Recursively calling computerUseLoop with new page context");
+        logger.trace(`CUAModelResponse: ${JSON.stringify(response, null, 2)}`);
+
 
         // Recursively call the computerUseLoop with the new page.
         response = await computerUseLoop(
@@ -240,13 +235,13 @@ export async function computerUseLoop(
       }
       let screenshotBuffer, screenshotBase64;
 
-      logger.trace("Capturing updated screenshot...");
+      logger.debug("Capturing updated screenshot");
 
       screenshotBuffer = await getScreenshotWithRetry(page);
       screenshotBase64 = screenshotBuffer.toString("base64");
 
       // Send the screenshot back as a computer_call_output.
-      response = (await sendInputToModel({
+      response = (await cua_service.sendScreenshotToModel({
         screenshotBase64,
         previousResponseId: response.id,
         lastCallId,
@@ -264,7 +259,11 @@ async function getScreenshotWithRetry(
       const screenshot = await page.screenshot();
       return screenshot;
     } catch (error) {
-      logger.error(`Attempt ${attempt} - Error capturing screenshot: ${error}`);
+      logger.error("Screenshot capture failed", { 
+        attempt,
+        maxRetries: retries,
+        error: error instanceof Error ? error.message : error 
+      });
       if (attempt === retries) {
         throw error;
       }
