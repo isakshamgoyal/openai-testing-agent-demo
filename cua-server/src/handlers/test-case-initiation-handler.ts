@@ -1,7 +1,7 @@
 import { Socket } from "socket.io";
 import logger from "../utils/logger";
 import TestCaseAgent from "../agents/test-case-agent";
-import { convertTestCaseToSteps, TestCase } from "../utils/testCaseUtils";
+import { convertTestCaseToSteps, TestCase } from "../utils/test-case-utils";
 import { cuaLoopHandler } from "./cua-loop-handler";
 import TestScriptReviewAgent from "../agents/test-script-review-agent";
 
@@ -33,7 +33,7 @@ export async function handleTestCaseInitiated(
 
     const testCaseAgent = new TestCaseAgent(loginRequired);
 
-    const testCaseResponse = await testCaseAgent.invokeResponseAPI(msg);
+    const testCaseResponse = await testCaseAgent.generateTestCases(msg);
     const testCaseJson = JSON.stringify(testCaseResponse);
 
     // Create a new test case review agent.
