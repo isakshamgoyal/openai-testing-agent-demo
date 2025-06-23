@@ -1,57 +1,44 @@
 import { PROMPT_WITHOUT_LOGIN, PROMPT_WITH_LOGIN } from "../lib/constants";
 import logger from "../utils/logger";
-import { AzureOpenAI } from "openai";
-import { z } from "zod";
-import { zodTextFormat } from "openai/helpers/zod";
-
-export const TestCaseStepSchema = z.object({
-  step_number: z.number(),
-  step_instructions: z.string(),
-  status: z.string().nullable(),
-});
-
-export const TestCaseSchema = z.object({
-  steps: z.array(TestCaseStepSchema),
-});
-
-export type TestCase = z.infer<typeof TestCaseSchema>;
-
-const client = new AzureOpenAI({
-  apiKey: process.env.AZURE_API_KEY,
-  apiVersion: process.env.AZURE_API_VERSION,
-  endpoint: process.env.AZURE_ENDPOINT,
-});
+import { openai_service } from "../services/openai-service";
+import { TestCase, TEST_CASE_JSON_SCHEMA } from "../utils/test-case-utils";
 
 class TestCaseAgent {
   private readonly model = process.env.AZURE_TEST_CASE_AGENT_DEPLOYMENT_NAME_CHAT || "o3-mini";
-  private readonly developer_prompt: string;
+  private readonly system_prompt: string;
   private readonly login_required: boolean;
 
   constructor(login_required = false) {
     this.login_required = login_required;
-    this.developer_prompt = login_required
-      ? PROMPT_WITH_LOGIN
-      : PROMPT_WITHOUT_LOGIN;
-    logger.trace(`Developer prompt: ${this.developer_prompt}`);
+    this.system_prompt = login_required ? PROMPT_WITH_LOGIN : PROMPT_WITHOUT_LOGIN;
   }
 
   /**
-   * Generate structured test steps via the Responses API.
+   * Generate test steps via the unified Response API.
    */
-  async invokeResponseAPI(userInstruction: string): Promise<TestCase> {
-    logger.debug("Invoking Response API", { userInstruction });
-    const response = await client.responses.parse({
+  async generateTestCases(userInstruction: string): Promise<TestCase> {
+    logger.info("Generating Test Cases");
+    
+    const response = await openai_service.responseAPI({
+      systemPrompt: this.system_prompt,
+      userMessage: userInstruction,
       model: this.model,
-      input: [
-        { role: "system", content: this.developer_prompt },
-        { role: "user", content: userInstruction },
-      ],
-      text: {
-        format: zodTextFormat(TestCaseSchema, "test_case"),
-      },
+      schema: TEST_CASE_JSON_SCHEMA,
+      schemaName: "test_case"
     });
-    logger.debug("Response API output", { output: response.output_parsed });
-    return response.output_parsed!;
+
+    if (!response.output_text) {
+      throw new Error("No output text received from OpenAI service");
+    }
+
+    const result: TestCase = JSON.parse(response.output_text);
+
+    logger.info("Test case generated successfully", { 
+      stepsCount: result.steps.length,
+      loginRequired: this.login_required
+    });
+    
+    return result;
   }
 }
 
