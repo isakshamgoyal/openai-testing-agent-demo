@@ -158,12 +158,12 @@ class OpenAICUAService {
 
     if (previousResponseId) {
       requestBody.previous_response_id = previousResponseId;
-      logger.debug("Including previous response ID", { previousResponseId });
+      logger.debug(`Including previous responseID, ${ previousResponseId }`);
     }
 
     try {
       const response = await cua_client.responses.create(requestBody);
-      logger.debug("CUA model response received", { responseId: response.id });
+      logger.debug(`CUA model response received, ${ response.id }`);
       return response as CUAModelResponse;
     } catch (error) {
       logger.error("CUA model call failed", { error: error instanceof Error ? error.message : error });
