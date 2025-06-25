@@ -33,10 +33,10 @@ class TestCaseAgent {
 
     const result: TestCase = JSON.parse(response.output_text);
 
-    logger.info("Test case generated successfully", { 
-      stepsCount: result.steps.length,
-      loginRequired: this.login_required
-    });
+    logger.info(`Test Cases Generated Successfully:\n${JSON.stringify({ 
+      loginRequired: this.login_required,
+      steps: result.steps
+    }, null, 2)}`);
     
     return result;
   }

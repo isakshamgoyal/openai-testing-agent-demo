@@ -9,7 +9,7 @@ export async function handleTestCaseInitiated(
   socket: Socket,
   data: any
 ): Promise<void> {
-  logger.debug(`Received testCaseInitiated with data: ${JSON.stringify(data)}`);
+  logger.debug(`Received Test Case Initiated with data:\n${JSON.stringify(data)}`);
   try {
     const { testCase, url, userName, password, userInfo } = data as {
       testCase: string;
@@ -29,7 +29,7 @@ export async function handleTestCaseInitiated(
     );
 
     // Create system prompt by combining form inputs.
-    const msg = `${testCase} URL: ${url} User Name: ${userName} Password: *********\n USER INFO:\n${userInfo}`;
+    const msg = `${testCase} URL: ${url} User Name: ${userName} Password: *********\nUSER INFO:\n${userInfo}`;
 
     const testCaseAgent = new TestCaseAgent(loginRequired);
 
@@ -58,15 +58,13 @@ export async function handleTestCaseInitiated(
 
     // Set the test case review agent in the socket.
     socket.data.testCaseReviewAgent = testCaseReviewAgent;
-
-    logger.debug(`Cleaned test case: ${testCaseJson}`);
+    logger.trace(`Cleaned Test Cases\n${testCaseJson}`);
 
     socket.emit("testcases", testCaseJson);
     socket.emit("message", "Task steps created.");
 
     const testScript = convertTestCaseToSteps(testCaseResponse as TestCase);
-
-    logger.debug(`Test script: ${testScript}`);
+    logger.debug(`Test Script:\n${testScript}`);
 
     // Start the test execution using the provided URL.
     // Pass the test case review agent to the cuaLoopHandler.

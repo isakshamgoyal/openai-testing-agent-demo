@@ -34,19 +34,14 @@ class TestScriptReviewAgent {
   constructor() {
     // Set the default model to use Azure deployment
     this.model = process.env.AZURE_TEST_SCRIPT_REVIEW_AGENT_DEPLOYMENT_NAME_CHAT || 'gpt-4o';
-    logger.debug("TestScriptReviewAgent initialized", { model: this.model });
+    logger.debug(`TestScriptReviewAgent Initialized with model: ${this.model}`);
   }
 
   /**
    * Creates the initial test script state from the user instructions.
    */
   async instantiateAgent(userInstruction: string): Promise<string> {
-    logger.debug(
-      `Invoking Chat API (instantiateAgent) with instruction: ${userInstruction}`
-    );
-    logger.debug(
-      `Instantiation agent - This should only be called once per test script run.`
-    );
+    logger.trace(`Instantiation agent with instruction (This should only be called once per test script run):\n${userInstruction}`);
 
     try {
       const response = await openai_service.responseAPI({
@@ -57,7 +52,7 @@ class TestScriptReviewAgent {
         schemaName: "test_script_output"
       });
 
-      logger.info("Agent instantiation successful", {responseId: response.id});
+      logger.info(`Agent Instantiation Successful: ${response.id}`);
 
       this.previous_response_id = response.id;
       this.test_script_state = JSON.parse(response.output_text!) as TestScriptState;
@@ -68,9 +63,9 @@ class TestScriptReviewAgent {
 
       return response.output_text!;
     } catch (error) {
-      logger.error("Failed to instantiate agent", { 
+      logger.error(`Failed to Instantiate Agent:\n${JSON.stringify({ 
         error: error instanceof Error ? error.message : error 
-      });
+      }, null, 2)}`);
       throw new Error(`Failed to instantiate agent: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -97,7 +92,7 @@ class TestScriptReviewAgent {
     }
     
     this.isProcessingQueue = true;
-    logger.debug("Starting queue processing");
+    logger.debug("Starting Queue Processing");
 
     try {
       while (this.taskQueue.length > 0) {
@@ -106,7 +101,7 @@ class TestScriptReviewAgent {
           const result = await this.processTestScriptReview(task.base64Image, task.userInstruction);
           task.resolve(result);
         } catch (error) {
-          logger.error("Task processing failed", { error: error instanceof Error ? error.message : error });
+          logger.error(`Task processing failed:\n${JSON.stringify({ error: error instanceof Error ? error.message : error }, null, 2)}`);
           task.reject(error instanceof Error ? error : new Error(String(error)));
         }
       }
@@ -121,10 +116,9 @@ class TestScriptReviewAgent {
    * then updating the test script state with any changes.
    */
   private async processTestScriptReview(base64Image: string, userInstruction?: string): Promise<string> {
-    logger.debug("Processing test script review", {
-      previousResponseId: this.previous_response_id
-    });
-  // If we don't already have a test_script_state, just parse blank structure
+    logger.debug(`Processing TestScriptReviewAgent with Previous Response ID: ${this.previous_response_id}`);
+  
+    // If we don't already have a test_script_state, just parse blank structure
     if (!this.test_script_state) {
       this.test_script_state = { steps: [] };
       logger.warn("No previous test script state found, creating empty state");
@@ -146,7 +140,7 @@ class TestScriptReviewAgent {
         schemaName: "test_script_output"
       });
 
-      logger.debug("TestScriptReviewAgent response received", JSON.stringify({ responseId: response.id}, null, 2));
+      logger.debug(`TestScriptReviewAgent Response received with Response ID: ${response.id}`);
 
       // Update previous response id if configured to do so
       if (this.includePreviousResponse) {
@@ -173,10 +167,10 @@ class TestScriptReviewAgent {
       this.test_script_state = newState;
 
       const updatedJson = JSON.stringify(this.test_script_state);
-      logger.debug("Test script state updated", { 
+      logger.debug(`Test Script State Updated:\n${JSON.stringify({ 
         stepsCount: this.test_script_state.steps.length,
         changedStepsCount: changedSteps.size
-      });
+      }, null, 2)}`);
       return updatedJson;
 
     } catch (error) {

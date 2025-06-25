@@ -46,11 +46,11 @@ export async function cuaLoopHandler(
 
     // Set viewport dimensions using env values
     await page.setViewportSize({ width: displayWidth, height: displayHeight });
-    logger.debug("Viewport set", { width: displayWidth, height: displayHeight });
+    logger.debug(`Viewport set:\n${JSON.stringify({ width: displayWidth, height: displayHeight }, null, 2)}`);
 
     // Navigate to the provided URL from the form.
     await page.goto(url);
-    logger.debug("Navigated to URL", { url });
+    logger.debug(`Navigated to URL: ${url}`);
 
     // wait for 2 seconds
     await page.waitForTimeout(2000);

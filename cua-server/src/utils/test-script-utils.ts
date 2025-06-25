@@ -43,6 +43,9 @@ export const TEST_SCRIPT_AGENT_JSON_SCHEMA = {
 export function getStepsWithStatusChange(oldSteps: TestScriptStep[], newSteps: TestScriptStep[]): Set<number> {
   const changedSteps = new Set<number>();
   
+  logger.trace(`Old Steps:\n${JSON.stringify(oldSteps, null, 2)}`);
+  logger.trace(`New Steps:\n${JSON.stringify(newSteps, null, 2)}`);
+  
   oldSteps.forEach(oldStep => {
     const newStep = newSteps.find(s => s.step_number === oldStep.step_number);
     if (newStep?.status !== "pending" && oldStep.status === "pending") {
@@ -50,7 +53,7 @@ export function getStepsWithStatusChange(oldSteps: TestScriptStep[], newSteps: T
     }
   });
   
-  logger.debug("Status changes detected", { changedSteps: Array.from(changedSteps) });
+  logger.debug(`Status Changes Detected:\n${JSON.stringify({ changedSteps: Array.from(changedSteps) }, null, 2)}`);
   return changedSteps;
 }
 

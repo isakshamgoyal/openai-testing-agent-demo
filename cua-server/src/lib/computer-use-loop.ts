@@ -115,7 +115,7 @@ export async function computerUseLoop(
             : "No reasoning provided";
           socket.emit("message", `${summaryText}`);
 
-          logger.debug("Model reasoning", { summary: summaryText });
+          logger.debug(`Model Reasoning:\n${JSON.stringify({ summary: summaryText })}`);
         });
       }
 
@@ -128,7 +128,7 @@ export async function computerUseLoop(
         computerCall.pending_safety_checks.length > 0
       ) {
         const safetyCheck = computerCall.pending_safety_checks[0];
-        logger.error("Safety check detected", { message: safetyCheck.message });
+        logger.error(`Safety check detected:\n${JSON.stringify({ message: safetyCheck.message }, null, 2)}`);
         socket.emit("message", `Safety check detected: ${safetyCheck.message}`);
         socket.emit(
           "message",
@@ -144,9 +144,7 @@ export async function computerUseLoop(
 
       const action = (computerCall as any).action;
 
-      logger.debug("Processing computer action", { 
-        actionType: action?.type,
-      });
+      logger.debug(`Processing Computer Action: ${action?.type}`);
 
       // Take a screenshot of the page before the action is executed.
       if (["click"].includes(action?.type)) {
@@ -187,20 +185,20 @@ export async function computerUseLoop(
 
         // Continue with your logic using newPage...
         const viewport = newPage.viewportSize();
-        logger.debug("New page viewport", { 
+        logger.debug(`New page viewport:\n${JSON.stringify({ 
           width: viewport?.width,
           height: viewport?.height 
-        });
+        }, null, 2)}`);
 
         if (
           !viewport ||
           viewport.width !== defaultWidth ||
           viewport.height !== defaultHeight
         ) {
-          logger.debug("Resetting viewport size", {
+          logger.debug(`Resetting viewport size:\n${JSON.stringify({
             from: `${viewport?.width || "undefined"}x${viewport?.height || "undefined"}`,
             to: `${defaultWidth}x${defaultHeight}`
-          });
+          }, null, 2)}`);
           await newPage.setViewportSize({
             width: defaultWidth,
             height: defaultHeight,

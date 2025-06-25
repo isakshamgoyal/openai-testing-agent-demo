@@ -73,8 +73,10 @@ class OpenAIService {
     schema,
     schemaName
   }: ResponseAPIInput): Promise<ResponseAPIResponse> {
-    
-    logger.debug(`OpenAI ResponseAPI called with input: ${JSON.stringify({
+
+    const operationName = schema ? `${schemaName} Agent` : "Basic Response";  
+    logger.debug(`OpenAI ResponseAPI called for: ${operationName}`);
+    logger.trace(`OpenAI ResponseAPI called with input:\n${JSON.stringify({
       systemPrompt: systemPrompt,
       userMessage: userMessage,
       hasBase64Image: !!base64Image,
@@ -82,7 +84,6 @@ class OpenAIService {
       model: model || null,
       schemaName: schemaName || null,
     }, null, 2)}`);
-
 
     const userContent = this.buildUserContent(userMessage, base64Image);
 
@@ -109,28 +110,47 @@ class OpenAIService {
     if (previousResponseId) {
       requestBody.previous_response_id = previousResponseId;
     }
-    
-    const operationName = schema ? `JSON Schema Response (${schemaName})` : "Basic Response";  
-    logger.debug(`Starting ${operationName}`);
-    logger.trace(`Request body: ${JSON.stringify(requestBody, null, 2)}`);
+
+    logger.trace(`Request Body:\n${JSON.stringify(requestBody, null, 2)}`);
 
     try {
+      // First attempt
       const response = await client.responses.create(requestBody);
-      logger.debug(`${operationName} completed successfully`, JSON.stringify({ 
+      logger.debug(`${operationName} Completed Successfully!\n${JSON.stringify({ 
         responseId: response.id,
         model: model
-      }, null, 2));
+      }, null, 2)}`);
       return response as ResponseAPIResponse;
     } catch (error) {
-      logger.error(`${operationName} failed: ` + JSON.stringify({ 
+      logger.error(`${operationName} failed\n${JSON.stringify({ 
         error: error instanceof Error ? error.message : error,
         model: model,
         errorType: error instanceof Error ? error.constructor.name : 'Unknown'
-      }, null, 2));
+      }, null, 2)}`);
+
+      // Retry without previousResponseId if it was provided
+      if (previousResponseId) {
+        logger.debug("Retrying without PreviousResponseId...");
+        delete requestBody.previous_response_id;
+        
+        try {
+          const retryResponse = await client.responses.create(requestBody);
+          logger.debug(`${operationName} retry succeeded\n${JSON.stringify({ 
+            responseId: retryResponse.id,
+            model: model
+          }, null, 2)}`);
+          return retryResponse as ResponseAPIResponse;
+        } catch (retryError) {
+          logger.error(`${operationName} retry also failed\n${JSON.stringify({ 
+            error: retryError instanceof Error ? retryError.message : retryError,
+            model: model
+          }, null, 2)}`);
+        }
+      }
+      
       throw error;
     }
   }
 }
 
-// Export singleton instance
 export const openai_service = new OpenAIService(); 

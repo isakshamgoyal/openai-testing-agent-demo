@@ -55,10 +55,10 @@ class OpenAICUAService {
    * Initialize CUA model with system and user prompts
    */
   async setupCUAModel(systemPrompt: string, userInfo: string): Promise<CUAModelResponse> {
-    logger.debug("Setting up CUA model", { 
+    logger.debug(`Started CUA Model Setup:\n${JSON.stringify({ 
       systemPromptLength: systemPrompt.length,
       userInfoLength: userInfo.length 
-    });
+    }, null, 2)}`);
     
     const enhancedSystemPrompt = `${CUA_SYSTEM_PROMPT}
       ${envInstructions ? `Environment specific instructions: ${envInstructions}` : ""}`;
@@ -122,11 +122,11 @@ class OpenAICUAService {
     previousResponseId: string,
     resultData: object = {}
   ): Promise<CUAModelResponse> {
-    logger.debug("Sending function result to CUA model", {
+    logger.debug(`Sending function result to CUA Model:\n${JSON.stringify({
       callId,
       previousResponseId,
       resultData
-    });
+    }, null, 2)}`);
 
     const input = [
       {
@@ -158,12 +158,12 @@ class OpenAICUAService {
 
     if (previousResponseId) {
       requestBody.previous_response_id = previousResponseId;
-      logger.debug(`Including previous responseID, ${ previousResponseId }`);
+      logger.debug(`Including previous ResponseID: ${ previousResponseId }`);
     }
 
     try {
       const response = await cua_client.responses.create(requestBody);
-      logger.debug(`CUA model response received, ${ response.id }`);
+      logger.debug(`CUA model response received: ${ response.id }`);
       return response as CUAModelResponse;
     } catch (error) {
       logger.error("CUA model call failed", { error: error instanceof Error ? error.message : error });
