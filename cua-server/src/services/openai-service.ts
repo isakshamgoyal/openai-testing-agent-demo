@@ -1,11 +1,16 @@
-import { AzureOpenAI } from "openai";
+import { OpenAI, AzureOpenAI } from "openai";
 import logger from "../utils/logger";
 
-const client = new AzureOpenAI({
-  apiKey: process.env.AZURE_API_KEY,
-  apiVersion: process.env.AZURE_API_VERSION,
-  endpoint: process.env.AZURE_ENDPOINT,
-});
+// If USE_OPENAI=true, use OpenAI, otherwise use Azure-OpenAI
+const client = process.env.USE_OPENAI === 'true' 
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    })
+  : new AzureOpenAI({
+      apiKey: process.env.AZURE_API_KEY,
+      apiVersion: process.env.AZURE_API_VERSION,
+      endpoint: process.env.AZURE_ENDPOINT,
+    });
 
 // Unified OpenAI service interface
 export interface ResponseAPIInput {

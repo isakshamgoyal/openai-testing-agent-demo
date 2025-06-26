@@ -32,8 +32,12 @@ class TestScriptReviewAgent {
   private isProcessingQueue: boolean = false;
 
   constructor() {
-    // Set the default model to use Azure deployment
-    this.model = process.env.AZURE_TEST_SCRIPT_REVIEW_AGENT_DEPLOYMENT_NAME_CHAT || 'gpt-4o';
+    // Use different model names based on provider
+    if (process.env.USE_OPENAI === 'true') {
+      this.model = process.env.OPENAI_TEST_SCRIPT_REVIEW_AGENT || "gpt-4o";
+    } else {
+      this.model = process.env.AZURE_TEST_SCRIPT_REVIEW_AGENT_DEPLOYMENT_NAME || 'gpt-4o';
+    }
     logger.debug(`TestScriptReviewAgent Initialized with model: ${this.model}`);
   }
 

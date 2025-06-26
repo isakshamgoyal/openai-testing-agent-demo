@@ -1,13 +1,17 @@
-import { AzureOpenAI } from "openai";
+import { OpenAI, AzureOpenAI } from "openai";
 import logger from "../utils/logger";
 import { CUA_SYSTEM_PROMPT } from "../lib/constants";
 
-// Single OpenAI client instance for CUA
-const cua_client = new AzureOpenAI({
-  apiKey: process.env.AZURE_API_KEY,
-  apiVersion: process.env.AZURE_API_VERSION,
-  endpoint: process.env.AZURE_ENDPOINT,
-});
+// If USE_OPENAI=true, use OpenAI, otherwise use Azure-OpenAI
+const cua_client = process.env.USE_OPENAI === 'true' 
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    })
+  : new AzureOpenAI({
+      apiKey: process.env.AZURE_API_KEY,
+      apiVersion: process.env.AZURE_API_VERSION,
+      endpoint: process.env.AZURE_ENDPOINT,
+    });
 
 // Environment specific instructions for the CUA model
 const envInstructions = process.env.ENV_SPECIFIC_INSTRUCTIONS || "";
@@ -48,7 +52,12 @@ class OpenAICUAService {
   private readonly model: string;
 
   constructor() {
-    this.model = process.env.AZURE_COMPUTER_USE_MODEL_DEPLOYMENT_NAME || 'computer-use-preview';
+    // Use different model names based on provider
+    if (process.env.USE_OPENAI === 'true') {
+      this.model = process.env.OPENAI_COMPUTER_USE_MODEL || 'computer-use-preview';
+    } else {
+      this.model = process.env.AZURE_COMPUTER_USE_MODEL_DEPLOYMENT_NAME || 'computer-use-preview';
+    }
   }
 
   /**

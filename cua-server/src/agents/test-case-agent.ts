@@ -4,13 +4,20 @@ import { openai_service } from "../services/openai-service";
 import { TestCase, TEST_CASE_JSON_SCHEMA } from "../utils/test-case-utils";
 
 class TestCaseAgent {
-  private readonly model = process.env.AZURE_TEST_CASE_AGENT_DEPLOYMENT_NAME_CHAT || "o3-mini";
+  private readonly model: string;
   private readonly system_prompt: string;
   private readonly login_required: boolean;
 
   constructor(login_required = false) {
     this.login_required = login_required;
     this.system_prompt = login_required ? PROMPT_WITH_LOGIN : PROMPT_WITHOUT_LOGIN;
+    
+    // Use different model names based on provider
+    if (process.env.USE_OPENAI === 'true') {
+      this.model = process.env.OPENAI_TEST_CASE_AGENT || "o3-mini";
+    } else {
+      this.model = process.env.AZURE_TEST_CASE_AGENT_DEPLOYMENT_NAME || "o3-mini";
+    }
   }
 
   /**
