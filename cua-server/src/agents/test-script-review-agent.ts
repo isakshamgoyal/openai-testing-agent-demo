@@ -3,151 +3,84 @@
  * Each call to checkTestScriptStatus enqueues a new screenshot processing job.
  */
 import logger from "../utils/logger";
-import OpenAI from "openai";
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { TEST_SCRIPT_REVIEW_PROMPT } from "../lib/constants";
+import { openai_service } from "../services/openai-service";
+import { ScreenshotUtils } from "../utils/screenshot-utils";
+import { TestScriptState, getStepsWithStatusChange, updateStepImagePaths, TEST_SCRIPT_AGENT_JSON_SCHEMA } from "../utils/test-script-utils";
 
-const openai = new OpenAI();
-
-interface TestScriptState {
-  steps: Array<{
-    step_number: number;
-    status: string;
-    step_reasoning: string;
-    image_path?: string;
-  }>;
-}
-
-interface Task {
+interface ReviewTask {
   base64Image: string;
   userInstruction?: string;
-  resolve: (value: any) => void;
-  reject: (error: any) => void;
+  resolve: (value: string) => void;
+  reject: (error: Error) => void;
 }
 
 class TestScriptReviewAgent {
-  model: string;
-  previous_response_id: string | null;
-  test_script_state: TestScriptState | null;
-  runFolder: string | null;
+  private readonly model: string;
+  private previous_response_id: string | null = null;
+  private test_script_state: TestScriptState | null = null;
+  private screenshotUtils: ScreenshotUtils | null = null;
 
   // Flag whether to include the previous screenshot response in the input to the LLM - true works best
-  includePreviousResponse: boolean = true;
+  private readonly includePreviousResponse: boolean = true;
 
   // Task queue related properties
-  private taskQueue: Task[] = [];
-  private processingQueue: boolean = false;
+  private readonly taskQueue: ReviewTask[] = [];
+  private isProcessingQueue: boolean = false;
 
   constructor() {
-    // Set the default model to "gpt-4o"
-    this.model = "gpt-4o";
-
-    // Maintain the previous response id.
-    this.previous_response_id = null;
-
-    // Save the current state of the test script. Initially null.
-    this.test_script_state = null;
-
-    // Initialize runFolder as null; will be set on each new run
-    this.runFolder = null;
+    // Use different model names based on provider
+    if (process.env.USE_OPENAI === 'true') {
+      this.model = process.env.OPENAI_TEST_SCRIPT_REVIEW_AGENT || "gpt-4o";
+    } else {
+      this.model = process.env.AZURE_TEST_SCRIPT_REVIEW_AGENT_DEPLOYMENT_NAME || 'gpt-4o';
+    }
+    logger.debug(`TestScriptReviewAgent Initialized with model: ${this.model}`);
   }
 
   /**
    * Creates the initial test script state from the user instructions.
    */
-  async instantiateAgent(userInstruction: string): Promise<any> {
-    logger.debug(
-      `Invoking Chat API (instantiateAgent) with instruction: ${userInstruction}`
-    );
-    logger.debug(
-      `Instantiation agent - This should only be called once per test script run.`
-    );
+  async instantiateAgent(userInstruction: string): Promise<string> {
+    logger.trace(`Instantiation agent with instruction (This should only be called once per test script run):\n${userInstruction}`);
 
-    const response = await openai.responses.create({
-      model: this.model,
-      input: [
-        { role: "system", content: TEST_SCRIPT_REVIEW_PROMPT },
-        {
-          role: "user",
-          content: [
-            { type: "input_text", text: "Instructions: " + userInstruction },
-          ],
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "test_script_output",
-          schema: {
-            type: "object",
-            properties: {
-              steps: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    step_number: { type: "number" },
-                    status: {
-                      type: "string",
-                      enum: ["pending", "Pass", "Fail"],
-                    },
-                    step_reasoning: { type: "string" },
-                  },
-                  required: ["step_number", "status", "step_reasoning"],
-                  additionalProperties: false,
-                },
-              },
-            },
-            required: ["steps"],
-            additionalProperties: false,
-          },
-        },
-      },
-    });
+    try {
+      const response = await openai_service.responseAPI({
+        systemPrompt: TEST_SCRIPT_REVIEW_PROMPT,
+        userMessage: "Instructions: " + userInstruction,
+        model: this.model,
+        schema: TEST_SCRIPT_AGENT_JSON_SCHEMA,
+        schemaName: "test_script_output"
+      });
 
-    logger.debug(
-      `Response from instantiateAgent: ${JSON.stringify(
-        response.output_text,
-        null,
-        2
-      )}`
-    );
+      logger.info(`Agent Instantiation Successful: ${response.id}`);
 
-    this.previous_response_id = response.id;
+      this.previous_response_id = response.id;
+      this.test_script_state = JSON.parse(response.output_text!) as TestScriptState;
+      
+      // Create screenshot utils instance for this session
+      this.screenshotUtils = new ScreenshotUtils();
+      await this.screenshotUtils.ensureRunFolder();
 
-    // Parse the returned JSON once, store it as an object
-    const parsedState: TestScriptState = JSON.parse(response.output_text);
-    this.test_script_state = parsedState;
-
-    // Create a unique folder for this run and store its name in runFolder
-    this.runFolder = uuidv4();
-    const runFolderPath = path.join(
-      process.cwd(),
-      "..",
-      "frontend",
-      "public",
-      "test_results",
-      this.runFolder
-    );
-    if (!fs.existsSync(runFolderPath)) {
-      fs.mkdirSync(runFolderPath, { recursive: true });
-      logger.debug(`Run folder created: ${runFolderPath}`);
+      return response.output_text!;
+    } catch (error) {
+      logger.error(`Failed to Instantiate Agent:\n${JSON.stringify({ 
+        error: error instanceof Error ? error.message : error 
+      }, null, 2)}`);
+      throw new Error(`Failed to instantiate agent: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-
-    return response.output_text; // Return the raw JSON string for now
   }
 
   /**
    * Enqueues a new test script review task.
    */
-  async checkTestScriptStatus(
-    base64Image: string,
-    userInstruction?: string
-  ): Promise<any> {
+  async checkTestScriptStatus(base64Image: string, userInstruction?: string): Promise<string> {
+    logger.debug("Enqueuing test script review task");
+
     return new Promise((resolve, reject) => {
-      // Enqueue the new task.
       this.taskQueue.push({ base64Image, userInstruction, resolve, reject });
       this.processQueue();
     });
@@ -156,198 +89,100 @@ class TestScriptReviewAgent {
   /**
    * Processes the task queue sequentially.
    */
-  private async processQueue() {
-    if (this.processingQueue) return;
-    this.processingQueue = true;
-
-    while (this.taskQueue.length > 0) {
-      const { base64Image, userInstruction, resolve, reject } =
-        this.taskQueue.shift()!;
-      try {
-        const result = await this.processTestScriptStatus(
-          base64Image,
-          userInstruction
-        );
-        resolve(result);
-      } catch (error) {
-        reject(error);
-      }
+  private async processQueue(): Promise<void> {
+    if (this.isProcessingQueue) {
+      logger.debug("Queue processing already in progress");
+      return;
     }
-    this.processingQueue = false;
+    
+    this.isProcessingQueue = true;
+    logger.debug("Starting Queue Processing");
+
+    try {
+      while (this.taskQueue.length > 0) {
+        const task = this.taskQueue.shift()!;
+        try {
+          const result = await this.processTestScriptReview(task.base64Image, task.userInstruction);
+          task.resolve(result);
+        } catch (error) {
+          logger.error(`Task processing failed:\n${JSON.stringify({ error: error instanceof Error ? error.message : error }, null, 2)}`);
+          task.reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+    } finally {
+      this.isProcessingQueue = false;
+      logger.debug("Queue processing completed");
+    }
   }
 
   /**
    * Processes the test script status by sending the screenshot (and optional instruction) to the LLM,
    * then updating the test script state with any changes.
    */
-  private async processTestScriptStatus(
-    base64Image: string,
-    userInstruction?: string
-  ): Promise<any> {
-    logger.debug(
-      `Invoking checkTestScriptStatus. Previous response id: ${this.previous_response_id}; Image length: ${base64Image.length}`
-    );
-
+  private async processTestScriptReview(base64Image: string, userInstruction?: string): Promise<string> {
+    logger.debug(`Processing TestScriptReviewAgent with Previous Response ID: ${this.previous_response_id}`);
+  
     // If we don't already have a test_script_state, just parse blank structure
     if (!this.test_script_state) {
       this.test_script_state = { steps: [] };
-      logger.warn("No previous test_script_state found, creating empty state.");
+      logger.warn("No previous test script state found, creating empty state");
     }
 
-    // Build the input messages starting with the system prompt.
-    const inputMessages: Array<any> = [
-      { role: "system", content: TEST_SCRIPT_REVIEW_PROMPT },
-    ];
+    if (!this.screenshotUtils) {
+      throw new Error("Screenshot utils not initialized. Call instantiateAgent first.");
+    }
 
-    // Construct the user message content.
-    const userContent: Array<any> = [];
-    if (userInstruction) {
-      userContent.push({
-        type: "input_text",
-        text: "Context: " + userInstruction,
+    try {
+      // Call the unified AI service - just pass the schema directly!
+      const response = await openai_service.responseAPI({
+        systemPrompt: TEST_SCRIPT_REVIEW_PROMPT,
+        userMessage: userInstruction ? "Context: " + userInstruction : undefined,
+        base64Image,
+        previousResponseId: this.previous_response_id || undefined,
+        model: this.model,
+        schema: TEST_SCRIPT_AGENT_JSON_SCHEMA,
+        schemaName: "test_script_output"
       });
-    }
-    userContent.push({
-      type: "input_image",
-      image_url: `data:image/png;base64,${base64Image}`,
-      detail: "high",
-    });
 
-    inputMessages.push({
-      role: "user",
-      content: userContent,
-    });
+      logger.debug(`TestScriptReviewAgent Response received with Response ID: ${response.id}`);
 
-    // Call the OpenAI API with the new payload.
-    const response = await openai.responses.create({
-      model: this.model,
-      input: inputMessages,
-      previous_response_id: this.previous_response_id || undefined,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "test_script_output",
-          schema: {
-            type: "object",
-            properties: {
-              steps: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    step_number: { type: "number" },
-                    status: {
-                      type: "string",
-                      enum: ["pending", "Pass", "Fail"],
-                    },
-                    step_reasoning: { type: "string" },
-                  },
-                  required: ["step_number", "status", "step_reasoning"],
-                  additionalProperties: false,
-                },
-              },
-            },
-            required: ["steps"],
-            additionalProperties: false,
-          },
-        },
-      },
-    });
-
-    logger.debug(`Response output text: ${response.output_text}`);
-
-    // Conditionally update the previous response id based on the config setting.
-    if (this.includePreviousResponse) {
-      this.previous_response_id = response.id;
-    }
-
-    // Parse the new steps from the model
-    const newState: TestScriptState = JSON.parse(response.output_text);
-
-    // Ensure the run folder exists (it should be set during instantiateAgent)
-    if (!this.runFolder) {
-      this.runFolder = uuidv4();
-      const runFolderPath = path.join(
-        process.cwd(),
-        "..",
-        "frontend",
-        "public",
-        "test_results",
-        this.runFolder
-      );
-      fs.mkdirSync(runFolderPath, { recursive: true });
-      logger.debug(`Run folder created: ${runFolderPath}`);
-    }
-
-    // Compare old vs. new test script states to determine if any step transitioned from "pending" -> "Pass"/"Fail".
-    const oldSteps = this.test_script_state ? this.test_script_state.steps : [];
-    const shouldSaveScreenshot = oldSteps.some((oldStep) => {
-      const newStep = newState.steps.find(
-        (s) => s.step_number === oldStep.step_number
-      );
-      return (
-        newStep &&
-        oldStep.status === "pending" &&
-        (newStep.status === "Pass" || newStep.status === "Fail")
-      );
-    });
-
-    if (shouldSaveScreenshot) {
-      // Save the screenshot under the run folder within /public/test_results
-      const screenshotFilename = uuidv4() + ".png";
-      const screenshotPathLocal = path.join(
-        process.cwd(),
-        "..",
-        "frontend",
-        "public",
-        "test_results",
-        this.runFolder,
-        screenshotFilename
-      );
-      try {
-        const bufferData = Buffer.from(base64Image, "base64");
-        fs.writeFileSync(screenshotPathLocal, new Uint8Array(bufferData));
-        logger.debug(`Screenshot saved to: ${screenshotPathLocal}`);
-      } catch (err) {
-        logger.error("Error saving screenshot", err);
+      // Update previous response id if configured to do so
+      if (this.includePreviousResponse) {
+        this.previous_response_id = response.id;
       }
 
-      // Iterate through steps and attach the screenshot path only for those with a status change.
-      for (const newStep of newState.steps) {
-        const oldStep = oldSteps.find(
-          (s) => s.step_number === newStep.step_number
-        );
-        if (oldStep) {
-          if (
-            oldStep.status === "pending" &&
-            (newStep.status === "Pass" || newStep.status === "Fail")
-          ) {
-            newStep.image_path =
-              "/test_results/" + this.runFolder + "/" + screenshotFilename;
-          } else if (oldStep.image_path) {
-            newStep.image_path = oldStep.image_path;
-          }
-        }
+      // Parse the new state
+      const newState: TestScriptState = JSON.parse(response.output_text!);
+      const oldSteps = this.test_script_state.steps;
+      
+      // Determine if any steps changed status
+      const changedSteps = getStepsWithStatusChange(oldSteps, newState.steps);
+      
+      // Save screenshot if there were status changes
+      let screenshotPath: string | undefined;
+      if (changedSteps.size > 0) {
+        screenshotPath = await this.screenshotUtils.saveScreenshot(base64Image);
       }
-    } else {
-      // No status change detected; simply carry over any existing image paths.
-      for (const newStep of newState.steps) {
-        const oldStep = oldSteps.find(
-          (s) => s.step_number === newStep.step_number
-        );
-        if (oldStep && oldStep.image_path) {
-          newStep.image_path = oldStep.image_path;
-        }
-      }
+
+      // Update image paths for all steps
+      updateStepImagePaths(oldSteps, newState.steps, changedSteps, screenshotPath);
+
+      // Update internal state
+      this.test_script_state = newState;
+
+      const updatedJson = JSON.stringify(this.test_script_state);
+      logger.debug(`Test Script State Updated:\n${JSON.stringify({ 
+        stepsCount: this.test_script_state.steps.length,
+        changedStepsCount: changedSteps.size
+      }, null, 2)}`);
+      return updatedJson;
+
+    } catch (error) {
+      logger.error("Test script review processing failed", { 
+        error: error instanceof Error ? error.message : error 
+      });
+      throw new Error(`Failed to process test script status: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-
-    // Update our internal test_script_state with the new state
-    this.test_script_state = newState;
-
-    // Return the entire updated JSON as a string
-    const updatedJson = JSON.stringify(this.test_script_state);
-    logger.debug(`Updated test_script_state: ${updatedJson}`);
-    return updatedJson;
   }
 }
 

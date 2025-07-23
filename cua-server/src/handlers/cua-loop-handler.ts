@@ -5,9 +5,8 @@ import logger from "../utils/logger";
 import { computerUseLoop } from "../lib/computer-use-loop";
 import { Socket } from "socket.io";
 import TestScriptReviewAgent from "../agents/test-script-review-agent";
-import { setupCUAModel } from "../services/openai-cua-client";
+import { cua_service, CUAModelInput } from "../services/openai-cua-service";
 import { LoginService } from "../services/login-service";
-import { ModelInput } from "../services/openai-cua-client";
 
 // Read viewport dimensions from .env file with defaults if not set
 const displayWidth: number = parseInt(process.env.DISPLAY_WIDTH || "1024", 10);
@@ -23,7 +22,11 @@ export async function cuaLoopHandler(
   loginRequired: boolean,
   userInfo?: string
 ) {
-  logger.info("Starting test script execution...");
+  logger.info("Starting test script execution", {
+    url,
+    loginRequired,
+    socketId: socket.id  
+  });
   socket.emit("message", "Starting test script execution...");
 
   try {
@@ -33,8 +36,7 @@ export async function cuaLoopHandler(
       args: ["--disable-extensions", "--disable-file-system"],
     });
 
-    logger.debug("Creating new browser instance...");
-
+    logger.debug("Browser launched successfully");
     socket.emit("message", "Launching browser...");
 
     const page = await browser.newPage();
@@ -44,17 +46,20 @@ export async function cuaLoopHandler(
 
     // Set viewport dimensions using env values
     await page.setViewportSize({ width: displayWidth, height: displayHeight });
+    logger.debug(`Viewport set:\n${JSON.stringify({ width: displayWidth, height: displayHeight }, null, 2)}`);
 
     // Navigate to the provided URL from the form.
     await page.goto(url);
+    logger.debug(`Navigated to URL: ${url}`);
 
     // wait for 2 seconds
     await page.waitForTimeout(2000);
 
     // Capture an initial screenshot.
     const screenshot_before_login = await page.screenshot();
-    const screenshot_before_login_base64 =
-      screenshot_before_login.toString("base64");
+    const screenshot_before_login_base64 = screenshot_before_login.toString("base64");
+
+    logger.debug("Initial screenshot captured");
 
     // Asynchronously check the status of the test script.
     const testScriptReviewResponsePromise =
@@ -62,82 +67,69 @@ export async function cuaLoopHandler(
 
     // Asynchronously emit the test script review response to the socket.
     testScriptReviewResponsePromise.then((testScriptReviewResponse) => {
-      logger.debug(
-        "Sending screenshot before login to Test Script Review Agent"
-      );
+      logger.debug("Sending initial screenshot to TestScriptReviewAgent");
       socket.emit("testscriptupdate", testScriptReviewResponse);
-      logger.trace(
-        `Initial test script state emitted: ${JSON.stringify(
-          testScriptReviewResponse,
-          null,
-          2
-        )}`
-      );
+    }).catch((error) => {
+      logger.error("Initial test script review failed", { 
+        error: error instanceof Error ? error.message : error 
+      });
     });
 
     // Await till network is idle.
     await page.waitForTimeout(2000);
 
-    let modelInput: ModelInput;
+    let cua_model_input: CUAModelInput;
 
     if (loginRequired) {
       // Note to the developer: Different applications will need their own login handlers.
-      logger.debug("Login required... proceeding with login.");
+      logger.info("Processing login requirement");
       socket.emit("message", "Login required... proceeding with login.");
 
       const loginService = new LoginService();
       await loginService.fillin_login_credentials(username, password, page);
 
-      logger.trace(
-        "Login execution completed... proceeding with test script execution."
-      );
+      logger.debug("Login credentials filled");
 
       // wait for 5 seconds
       await page.waitForTimeout(5000);
 
       const screenshot_after_login = await page.screenshot();
-      const screenshot_after_login_base64 =
-        screenshot_after_login.toString("base64");
+      const screenshot_after_login_base64 = screenshot_after_login.toString("base64");
+
+      logger.debug("Post-login screenshot captured", { 
+        size: screenshot_after_login_base64.length 
+      });
 
       // Asynchronously check the status of the test script.
       const testScriptReviewResponsePromise_after_login =
-        testCaseReviewAgent.checkTestScriptStatus(
-          screenshot_after_login_base64
-        );
+        testCaseReviewAgent.checkTestScriptStatus(screenshot_after_login_base64);
 
       // Asynchronously emit the test script review response to the socket.
       testScriptReviewResponsePromise_after_login.then(
         (testScriptReviewResponse) => {
-          logger.debug(
-            "Sending screenshot after login to Test Script Review Agent"
-          );
-          // Emit the test script review response to the socket.
+          logger.debug("Sending post-login screenshot to TestScriptReviewAgent");
           socket.emit("testscriptupdate", testScriptReviewResponse);
-          logger.trace(
-            `Test script state emitted after login: ${JSON.stringify(
-              testScriptReviewResponse,
-              null,
-              2
-            )}`
-          );
         }
-      );
+      ).catch((error) => {
+        logger.error("Post-login test script review failed", { 
+          error: error instanceof Error ? error.message : error 
+        });
+      });
 
       await loginService.click_login_button(page);
 
-      socket.emit(
-        "message",
-        "Login step executed... proceeding with test script execution."
-      );
+      socket.emit("message", "Login step executed... proceeding with test script execution.");
+      logger.info("Login process completed");
 
-      modelInput = {
+      cua_model_input = {
         screenshotBase64: screenshot_after_login_base64,
         previousResponseId: undefined,
         lastCallId: undefined,
       };
     } else {
       // If login is not required, use the screenshot before login.
-      modelInput = {
+      logger.debug("No login required - using initial screenshot");
+      cua_model_input = {
         screenshotBase64: screenshot_before_login_base64,
         previousResponseId: undefined,
         lastCallId: undefined,
@@ -145,17 +137,14 @@ export async function cuaLoopHandler(
     }
 
     // Start with an initial call (without a screenshot or call_id)
+    logger.debug("Setting up CUA model");
+    
     const userInfoStr = userInfo ?? "";
-    let initial_response = await setupCUAModel(systemPrompt, userInfoStr);
+    let initial_response = await cua_service.setupCUAModel(systemPrompt, userInfoStr);
 
-    logger.debug(
-      `Initial response from CUA model: ${JSON.stringify(
-        initial_response,
-        null,
-        2
-      )}`
-    );
-    logger.debug(`Starting computer use loop...`);
+    logger.info("CUA model setup completed", { 
+      responseId: initial_response.id 
+    });
 
     const response = await computerUseLoop(
       page,
@@ -180,6 +169,11 @@ export async function cuaLoopHandler(
       });
     }
   } catch (error) {
-    logger.error(`Error during playwright loop: ${error}`);
+    logger.error("Test script execution failed", { 
+      error: error instanceof Error ? error.message : error,
+      url,
+      loginRequired 
+    });
+    socket.emit("message", "Test script execution failed. Please check the logs.");
   }
 }

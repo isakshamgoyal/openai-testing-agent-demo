@@ -37,9 +37,7 @@ io.on("connection", (socket) => {
 
   // Log all events
   socket.onAny((event, msg) => {
-    logger.trace(
-      `Received event: ${event} with message: ${JSON.stringify(msg)}`
-    );
+    logger.trace(`Received event: ${event} with message:\n${JSON.stringify(msg, null, 2)}`);
   });
 
   // Handle incoming messages

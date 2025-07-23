@@ -30,7 +30,6 @@ export class LoginService {
         .first()
         .fill(password, { timeout: 5_000 });
 
-      logger.debug("Login credentials filled in.");
       return true;
     } catch (error) {
       logger.error("❌ Error filling login credentials:", error);

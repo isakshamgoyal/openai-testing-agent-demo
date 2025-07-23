@@ -1,7 +1,7 @@
 import { Socket } from "socket.io";
 import logger from "../utils/logger";
 import TestCaseAgent from "../agents/test-case-agent";
-import { convertTestCaseToSteps, TestCase } from "../utils/testCaseUtils";
+import { convertTestCaseToSteps, TestCase } from "../utils/test-case-utils";
 import { cuaLoopHandler } from "./cua-loop-handler";
 import TestScriptReviewAgent from "../agents/test-script-review-agent";
 
@@ -9,7 +9,7 @@ export async function handleTestCaseInitiated(
   socket: Socket,
   data: any
 ): Promise<void> {
-  logger.debug(`Received testCaseInitiated with data: ${JSON.stringify(data)}`);
+  logger.debug(`Received Test Case Initiated with data:\n${JSON.stringify(data)}`);
   try {
     const { testCase, url, userName, password, userInfo } = data as {
       testCase: string;
@@ -29,11 +29,11 @@ export async function handleTestCaseInitiated(
     );
 
     // Create system prompt by combining form inputs.
-    const msg = `${testCase} URL: ${url} User Name: ${userName} Password: *********\n USER INFO:\n${userInfo}`;
+    const msg = `${testCase} URL: ${url} User Name: ${userName} Password: *********\nUSER INFO:\n${userInfo}`;
 
     const testCaseAgent = new TestCaseAgent(loginRequired);
 
-    const testCaseResponse = await testCaseAgent.invokeResponseAPI(msg);
+    const testCaseResponse = await testCaseAgent.generateTestCases(msg);
     const testCaseJson = JSON.stringify(testCaseResponse);
 
     // Create a new test case review agent.
@@ -58,15 +58,13 @@ export async function handleTestCaseInitiated(
 
     // Set the test case review agent in the socket.
     socket.data.testCaseReviewAgent = testCaseReviewAgent;
-
-    logger.debug(`Cleaned test case: ${testCaseJson}`);
+    logger.trace(`Cleaned Test Cases\n${testCaseJson}`);
 
     socket.emit("testcases", testCaseJson);
     socket.emit("message", "Task steps created.");
 
     const testScript = convertTestCaseToSteps(testCaseResponse as TestCase);
-
-    logger.debug(`Test script: ${testScript}`);
+    logger.debug(`Test Script:\n${testScript}`);
 
     // Start the test execution using the provided URL.
     // Pass the test case review agent to the cuaLoopHandler.

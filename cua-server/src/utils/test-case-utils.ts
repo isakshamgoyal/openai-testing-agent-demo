@@ -19,6 +19,30 @@ export interface TestCase {
   steps: TestCaseStep[];
 }
 
+// Test case JSON schema for structured output
+export const TEST_CASE_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    steps: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          step_number: { type: "number" },
+          step_instructions: { type: "string" },
+          status: {type: ["string", "null"]}
+        },
+        required: ["step_number", "step_instructions", "status"],
+        additionalProperties: false
+      },
+      strict: true
+    }
+  },
+  required: ["steps"],
+  additionalProperties: false
+} as const;
+
+
 export function convertTestCaseToSteps(testCase: TestCase): string {
   if (!testCase.steps || !Array.isArray(testCase.steps)) {
     throw new Error("Invalid test case format: missing steps array");
